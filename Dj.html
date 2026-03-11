@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Rohans Web Media Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- jsmediatags to read file properties -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsmediatags/3.9.5/jsmediatags.min.js"></script>
+    <style>
+        :root {
+            --accent: #fbbf24; 
+            --vlc-bg: #0a0a0a;
+            --vlc-surface: #161616;
+        }
+
+        body.theme-yellow { --accent: #fbbf24; }
+        body.theme-pink { --accent: #ec4899; }
+        body.theme-red { --accent: #ef4444; }
+        body.theme-cyber { --accent: #00f2ff; }
+
+        body {
+            background-color: var(--vlc-bg);
+            color: #ffffff;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .accent-text { color: var(--accent); }
+        .accent-bg { background-color: var(--accent); }
+        
+        /* CD Logo */
+        .vlc-logo-grad {
+            background: radial-gradient(circle at 30% 30%, #444 0%, #000 100%);
+            position: relative;
+        }
+        .vlc-logo-inner {
+            background: conic-gradient(from 180deg, var(--accent), #fff, var(--accent), #000, var(--accent));
+            mask: radial-gradient(circle, transparent 25%, black 26%, black 85%, transparent 86%);
+            -webkit-mask: radial-gradient(circle, transparent 25%, black 26%, black 85%, transparent 86%);
+        }
+
+        .nav-tab {
+            padding: 14px 0;
+            font-size: 12px;
+            font-weight: 800;
+            color: #555;
+            text-transform: uppercase;
+            position: relative;
+            cursor: pointer;
+        }
+        .nav-tab.active { color: var(--accent); }
+        .nav-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 3px; background: var(--accent);
+            border-radius: 3px;
+        }
+
+        .theme-dot {
+            width: 32px; height: 32px; border-radius: 50%;
+            cursor: pointer; border: 3px solid transparent;
+        }
+        .theme-dot.selected { border-color: white; transform: scale(1.1); }
+
+        /* CD Rotation */
+        .cd-disk-outer {
+            width: min(65vw, 280px);
+            height: min(65vw, 280px);
+            border-radius: 50%;
+            background: #000;
+            position: relative;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.9);
+            animation: rotate 10s linear infinite;
+            animation-play-state: paused;
+        }
+        .playing .cd-disk-outer { animation-play-state: running; }
+        .cd-surface {
+            position: absolute; inset: 2px; border-radius: 50%;
+            background: repeating-radial-gradient(circle, #111 0%, #222 1%, #111 2%);
+        }
+        .cd-label {
+            position: absolute; inset: 32%; background: var(--accent);
+            border-radius: 50%; border: 5px solid #000;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        @keyframes rotate { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+        input[type=range]::-webkit-slider-runnable-track { height: 4px; background: #333; }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px;
+            border-radius: 50%; background: var(--accent); margin-top: -6px;
+        }
+
+        #full-player {
+            position: fixed; top: 100%; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 100; transition: top 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
+            display: flex; flex-direction: column;
+        }
+        #full-player.open { top: 0; }
+        .btn-active { color: var(--accent) !important; }
+
+        .album-card {
+            background: #111;
+            border-radius: 12px;
+            padding: 12px;
+            border: 1px solid #222;
+        }
+    </style>
+</head>
+<body class="theme-yellow">
+
+    <header class="p-4 flex justify-between items-center bg-[#111] z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full vlc-logo-grad flex items-center justify-center overflow-hidden">
+                <div class="absolute inset-0 vlc-logo-inner"></div>
+                <div class="w-2.5 h-2.5 bg-white rounded-full z-10"></div>
+            </div>
+            <div>
+                <h1 class="font-black text-sm tracking-tighter">ROHANS WEB</h1>
+                <p class="text-[9px] accent-text font-bold uppercase tracking-widest">Media Player Pro</p>
+            </div>
+        </div>
+        <div class="flex gap-4 text-gray-500">
+            <i class="fas fa-search p-2"></i>
+            <i class="fas fa-cog p-2" onclick="showSetup()"></i>
+        </div>
+    </header>
+
+    <div class="flex bg-[#111] px-6 gap-8 border-b border-white/5 shadow-lg">
+        <div class="nav-tab active" id="tab-songs" onclick="switchTab('songs')">Songs</div>
+        <div class="nav-tab" id="tab-albums" onclick="switchTab('albums')">Albums</div>
+        <div class="nav-tab" id="tab-playlists" onclick="switchTab('playlists')">Playlists</div>
+    </div>
+
+    <main id="content-view" class="flex-1 overflow-y-auto pb-32">
+        <!-- Setup Screen -->
+        <div id="setup-view" class="flex flex-col items-center justify-center min-h-[70vh] p-8 text-center">
+            <div class="w-24 h-24 rounded-full vlc-logo-grad mb-8 flex items-center justify-center scale-125">
+                <div class="absolute inset-0 vlc-logo-inner"></div>
+                <div class="w-4 h-4 bg-white rounded-full z-10"></div>
+            </div>
+            <h2 class="text-2xl font-black mb-2 uppercase italic tracking-tighter">Setup Media Engine</h2>
+            <p class="text-gray-500 text-sm mb-10">Sync your local folder to begin playback.</p>
+            
+            <div class="flex gap-4 mb-12">
+                <div class="theme-dot bg-yellow-400" id="dot-yellow" onclick="setTheme('yellow', this)"></div>
+                <div class="theme-dot bg-pink-500" id="dot-pink" onclick="setTheme('pink', this)"></div>
+                <div class="theme-dot bg-red-600" id="dot-red" onclick="setTheme('red', this)"></div>
+                <div class="theme-dot bg-cyan-400" id="dot-cyber" onclick="setTheme('cyber', this)"></div>
+            </div>
+
+            <button onclick="document.getElementById('folder-input').click()" class="accent-bg text-black font-black py-4 px-10 rounded-full tracking-widest text-xs shadow-2xl active:scale-95 transition">
+                SELECT MUSIC FOLDER
+            </button>
+            <p id="storage-status" class="text-[10px] text-gray-600 mt-4 uppercase font-bold hidden">Library Loaded from Cache</p>
+        </div>
+
+        <div id="songs-container" class="hidden"></div>
+        <div id="albums-container" class="hidden p-4 grid grid-cols-2 gap-4"></div>
+        <div id="playlists-container" class="hidden p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-black tracking-widest text-xs">MY FAVORITES</h3>
+                <button onclick="clearFavorites()" class="text-[10px] text-gray-500 border border-white/10 px-2 py-1 rounded hover:bg-white/5 transition">CLEAR ALL</button>
+            </div>
+            <div id="favorites-list" class="space-y-2">
+                <p class="text-gray-600 text-xs italic">No favorites yet. Press the heart icon while playing.</p>
+            </div>
+        </div>
+    </main>
+
+    <!-- Mini Player -->
+    <div id="mini-player" class="fixed bottom-4 left-4 right-4 h-16 bg-[#1a1a1a] rounded-2xl border border-white/10 flex items-center px-4 hidden shadow-2xl z-50" onclick="toggleFullPlayer(true)">
+        <div class="w-10 h-10 rounded-lg accent-bg flex items-center justify-center mr-3 overflow-hidden">
+            <i class="fas fa-music text-black"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+            <p id="mini-title" class="text-sm font-bold truncate">Song</p>
+            <p id="mini-artist" class="text-[10px] text-gray-500 uppercase font-bold">Artist</p>
+        </div>
+        <div class="flex items-center gap-4 ml-4" onclick="event.stopPropagation()">
+            <button id="mini-play-btn" class="text-xl accent-text w-10 h-10 flex items-center justify-center"><i class="fas fa-play"></i></button>
+        </div>
+    </div>
+
+    <!-- Full Player -->
+    <div id="full-player">
+        <div class="p-6 flex items-center justify-between">
+            <button onclick="toggleFullPlayer(false)" class="text-2xl text-gray-500 hover:text-white transition"><i class="fas fa-chevron-down"></i></button>
+            <p class="text-[10px] font-black accent-text tracking-[0.4em] uppercase">ROHAN MEDIA</p>
+            <button id="fav-btn" onclick="toggleFavorite()" class="text-xl text-gray-500 hover:scale-110 transition"><i class="fas fa-heart"></i></button>
+        </div>
+
+        <div class="flex-1 flex flex-col items-center justify-center" id="player-main">
+            <div class="cd-disk-outer mb-12">
+                <div class="cd-surface"></div>
+                <div class="cd-label">
+                    <div class="w-10 h-10 bg-black rounded-full flex items-center justify-center">
+                        <div class="w-3 h-3 bg-white/20 rounded-full"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center px-10">
+                <h2 id="full-title" class="text-2xl font-black truncate mb-1">Track Title</h2>
+                <p id="full-artist" class="accent-text text-xs font-bold tracking-widest uppercase opacity-70">Artist Name</p>
+            </div>
+        </div>
+
+        <div class="p-10">
+            <input type="range" id="seek-bar" value="0" class="mb-2">
+            <div class="flex justify-between text-[10px] font-bold text-gray-600 mb-8">
+                <span id="curr-time">00:00</span>
+                <span id="dur-time">00:00</span>
+            </div>
+
+            <div class="flex justify-between items-center">
+                <button id="shuffle-btn" class="text-lg text-gray-600" onclick="toggleShuffle()"><i class="fas fa-random"></i></button>
+                <div class="flex items-center gap-8">
+                    <button onclick="playPrev()" class="text-3xl hover:scale-110 transition active:scale-95"><i class="fas fa-step-backward"></i></button>
+                    <button id="main-play-btn" class="w-20 h-20 accent-bg text-black rounded-full text-3xl flex items-center justify-center shadow-xl hover:scale-105 active:scale-95 transition">
+                        <i class="fas fa-play"></i>
+                    </button>
+                    <button onclick="playNext()" class="text-3xl hover:scale-110 transition active:scale-95"><i class="fas fa-step-forward"></i></button>
+                </div>
+                <button id="repeat-btn" class="text-lg text-gray-600" onclick="toggleRepeat()"><i class="fas fa-redo"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden Folder Input -->
+    <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden">
+
+    <script>
+        const jsmediatags = window.jsmediatags;
+        let playlist = [];
+        let favorites = [];
+        let albums = {};
+        let currentIndex = -1;
+        let isShuffle = false;
+        let isRepeat = false;
+        let currentTheme = 'yellow';
+        const audio = new Audio();
+
+        const views = {
+            setup: document.getElementById('setup-view'),
+            songs: document.getElementById('songs-container'),
+            albums: document.getElementById('albums-container'),
+            playlists: document.getElementById('playlists-container')
+        };
+
+        // Initialize App
+        window.onload = () => {
+            loadFromLocalStorage();
+            if (playlist.length > 0) {
+                renderSongs();
+                renderAlbums();
+                renderPlaylists();
+                document.getElementById('storage-status').classList.remove('hidden');
+                switchTab('songs');
+            }
+        };
+
+        function saveToLocalStorage() {
+            const data = {
+                theme: currentTheme,
+                favorites: favorites, // Metadata
+                playlistMetadata: playlist.map(p => ({ 
+                    name: p.name, 
+                    artist: p.artist, 
+                    album: p.album 
+                }))
+            };
+            localStorage.setItem('rohan_player_data', JSON.stringify(data));
+        }
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem('rohan_player_data');
+            if (!saved) {
+                setTheme('yellow', document.getElementById('dot-yellow'));
+                return;
+            }
+            const data = JSON.parse(saved);
+            
+            // Restore Theme
+            currentTheme = data.theme || 'yellow';
+            setTheme(currentTheme, document.getElementById(`dot-${currentTheme}`));
+
+            // Restore Favorites
+            favorites = data.favorites || [];
+            
+            // Restore Playlist Structure (Metadata only - won't play until re-selected folder)
+            if (data.playlistMetadata) {
+                playlist = data.playlistMetadata;
+                albums = {};
+                playlist.forEach(track => {
+                    if (!albums[track.album]) albums[track.album] = [];
+                    albums[track.album].push(track);
+                });
+            }
+            renderPlaylists();
+        }
+
+        function setTheme(theme, el) {
+            currentTheme = theme;
+            document.body.className = `theme-${theme}`;
+            document.querySelectorAll('.theme-dot').forEach(d => d.classList.remove('selected'));
+            if (el) el.classList.add('selected');
+            saveToLocalStorage();
+        }
+
+        function showSetup() {
+            Object.values(views).forEach(v => v.classList.add('hidden'));
+            views.setup.classList.remove('hidden');
+        }
+
+        function toggleFullPlayer(open) {
+            document.getElementById('full-player').classList.toggle('open', open);
+        }
+
+        function switchTab(tab) {
+            if (playlist.length === 0) return;
+            Object.values(views).forEach(v => v.classList.add('hidden'));
+            views[tab].classList.remove('hidden');
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            const tabEl = document.getElementById(`tab-${tab}`);
+            if(tabEl) tabEl.classList.add('active');
+        }
+
+        async function processFiles(files) {
+            playlist = [];
+            albums = {};
+            
+            for (let file of files) {
+                if (!file.type.startsWith('audio/')) continue;
+                
+                const track = {
+                    file: file,
+                    name: file.name.replace(/\.[^/.]+$/, ""),
+                    artist: "Unknown Artist",
+                    album: "Unknown Album"
+                };
+
+                try {
+                    await new Promise((resolve) => {
+                        jsmediatags.read(file, {
+                            onSuccess: (tag) => {
+                                track.artist = tag.tags.artist || "Unknown Artist";
+                                track.album = tag.tags.album || "Unknown Album";
+                                resolve();
+                            },
+                            onError: () => resolve()
+                        });
+                    });
+                } catch(e) {}
+
+                playlist.push(track);
+                if (!albums[track.album]) albums[track.album] = [];
+                albums[track.album].push(track);
+            }
+
+            saveToLocalStorage();
+            renderSongs();
+            renderAlbums();
+            if (playlist.length > 0) loadTrack(0);
+            switchTab('songs');
+        }
+
+        function renderSongs() {
+            views.songs.innerHTML = '';
+            playlist.forEach((t, i) => {
+                const item = document.createElement('div');
+                item.className = `flex items-center p-4 border-b border-white/5 active:bg-white/5 cursor-pointer ${currentIndex === i ? 'bg-white/5' : ''}`;
+                item.onclick = () => loadTrack(i);
+                item.innerHTML = `
+                    <div class="w-10 h-10 rounded bg-[#222] flex items-center justify-center mr-4">
+                        <i class="fas ${currentIndex === i ? 'fa-volume-up accent-text' : 'fa-music text-gray-700'}"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <p class="font-bold text-sm truncate">${t.name}</p>
+                        <p class="text-[10px] text-gray-500 uppercase font-bold">${t.artist}</p>
+                    </div>
+                `;
+                views.songs.appendChild(item);
+            });
+        }
+
+        function renderAlbums() {
+            views.albums.innerHTML = '';
+            Object.keys(albums).forEach(albumName => {
+                const card = document.createElement('div');
+                card.className = "album-card flex flex-col items-center text-center cursor-pointer active:scale-95 transition";
+                card.onclick = () => {
+                    const albumTracks = albums[albumName];
+                    playlist = albumTracks;
+                    renderSongs();
+                    loadTrack(0);
+                    switchTab('songs');
+                };
+                card.innerHTML = `
+                    <div class="w-full aspect-square bg-[#222] rounded-lg mb-2 flex items-center justify-center border border-white/5">
+                        <i class="fas fa-compact-disc text-3xl opacity-20 accent-text"></i>
+                    </div>
+                    <p class="text-xs font-black truncate w-full uppercase tracking-tighter">${albumName}</p>
+                    <p class="text-[9px] text-gray-500 font-bold tracking-widest">${albums[albumName].length} TRACKS</p>
+                `;
+                views.albums.appendChild(card);
+            });
+        }
+
+        function toggleFavorite() {
+            if (currentIndex === -1) return;
+            const currentTrack = playlist[currentIndex];
+            
+            // Check if already favorited based on name and artist
+            const existingIdx = favorites.findIndex(f => f.name === currentTrack.name && f.artist === currentTrack.artist);
+            
+            if (existingIdx === -1) {
+                // Add to favorites (Metadata only)
+                favorites.push({ 
+                    name: currentTrack.name, 
+                    artist: currentTrack.artist, 
+                    album: currentTrack.album 
+                });
+            } else {
+                // Remove from favorites
+                favorites.splice(existingIdx, 1);
+            }
+            
+            updateFavUI();
+            renderPlaylists();
+            saveToLocalStorage();
+        }
+
+        function clearFavorites() {
+            favorites = [];
+            updateFavUI();
+            renderPlaylists();
+            saveToLocalStorage();
+        }
+
+        function updateFavUI() {
+            if (currentIndex === -1) return;
+            const currentTrack = playlist[currentIndex];
+            const isFav = favorites.some(f => f.name === currentTrack.name && f.artist === currentTrack.artist);
+            const favBtn = document.getElementById('fav-btn');
+            
+            if (isFav) {
+                favBtn.classList.remove('text-gray-500');
+                favBtn.classList.add('accent-text');
+            } else {
+                favBtn.classList.remove('accent-text');
+                favBtn.classList.add('text-gray-500');
+            }
+        }
+
+        function renderPlaylists() {
+            const list = document.getElementById('favorites-list');
+            if (favorites.length === 0) {
+                list.innerHTML = `<p class="text-gray-600 text-xs italic">No favorites yet. Press the heart icon while playing.</p>`;
+                return;
+            }
+            list.innerHTML = '';
+            favorites.forEach(f => {
+                const item = document.createElement('div');
+                item.className = "p-3 bg-white/5 rounded-lg text-sm font-bold flex justify-between items-center";
+                item.innerHTML = `
+                    <div class="min-w-0 flex-1">
+                        <p class="truncate">${f.name}</p>
+                        <p class="text-[9px] text-gray-600 uppercase font-black">${f.artist}</p>
+                    </div>
+                    <i class="fas fa-heart accent-text ml-4"></i>`;
+                list.appendChild(item);
+            });
+        }
+
+        function loadTrack(index) {
+            const track = playlist[index];
+            if (!track || !track.file) {
+                showSetup();
+                return;
+            }
+            
+            currentIndex = index;
+            if (audio.src) URL.revokeObjectURL(audio.src);
+            audio.src = URL.createObjectURL(track.file);
+            
+            document.getElementById('mini-title').innerText = track.name;
+            document.getElementById('full-title').innerText = track.name;
+            document.getElementById('mini-artist').innerText = track.artist;
+            document.getElementById('full-artist').innerText = track.artist;
+            
+            document.getElementById('mini-player').classList.remove('hidden');
+            audio.play();
+            updateUI(true);
+            updateFavUI();
+            renderSongs();
+        }
+
+        function updateUI(playing) {
+            const icon = playing ? 'fa-pause' : 'fa-play';
+            document.getElementById('main-play-btn').innerHTML = `<i class="fas ${icon}"></i>`;
+            document.getElementById('mini-play-btn').innerHTML = `<i class="fas ${icon}"></i>`;
+            document.getElementById('player-main').classList.toggle('playing', playing);
+        }
+
+        function playNext() {
+            if (playlist.length === 0) return;
+            let next = isShuffle ? Math.floor(Math.random() * playlist.length) : (currentIndex + 1) % playlist.length;
+            loadTrack(next);
+        }
+
+        function playPrev() {
+            if (playlist.length === 0) return;
+            loadTrack((currentIndex - 1 + playlist.length) % playlist.length);
+        }
+
+        function toggleShuffle() { 
+            isShuffle = !isShuffle; 
+            document.getElementById('shuffle-btn').classList.toggle('btn-active', isShuffle); 
+        }
+        
+        function toggleRepeat() { 
+            isRepeat = !isRepeat; 
+            document.getElementById('repeat-btn').classList.toggle('btn-active', isRepeat); 
+        }
+
+        document.getElementById('folder-input').onchange = (e) => processFiles(Array.from(e.target.files));
+        
+        document.getElementById('main-play-btn').onclick = () => { 
+            if (audio.paused) audio.play(); else audio.pause(); 
+            updateUI(!audio.paused); 
+        };
+        
+        document.getElementById('mini-play-btn').onclick = (e) => { 
+            e.stopPropagation(); 
+            document.getElementById('main-play-btn').click(); 
+        };
+
+        audio.ontimeupdate = () => {
+            if (!audio.duration) return;
+            document.getElementById('seek-bar').value = (audio.currentTime / audio.duration) * 100;
+            document.getElementById('curr-time').innerText = formatTime(audio.currentTime);
+            document.getElementById('dur-time').innerText = formatTime(audio.duration);
+        };
+        
+        document.getElementById('seek-bar').oninput = (e) => {
+            if (!audio.duration) return;
+            audio.currentTime = (e.target.value / 100) * audio.duration;
+        };
+        
+        audio.onended = () => isRepeat ? (audio.currentTime = 0, audio.play()) : playNext();
+        
+        function formatTime(s) { 
+            if (isNaN(s)) return "00:00"; 
+            const m = Math.floor(s/60); 
+            const sc = Math.floor(s%60); 
+            return `${m.toString().padStart(2,'0')}:${sc.toString().padStart(2,'0')}`; 
+        }
+
+    </script>
+</body>
+</html>
